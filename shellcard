@@ -1,0 +1,834 @@
+#!/bin/sh
+
+#            DO WHAT THE FUCK YOU WANT TO PUBLIC LICENSE
+#                    Version 2, December 2004
+#
+# Copyright (C) 2021 Jak.W https://github.com/jakwings/shellcard
+#
+# Everyone is permitted to copy and distribute verbatim or modified
+# copies of this license document, and changing it is allowed as long
+# as the name is changed.
+#
+#            DO WHAT THE FUCK YOU WANT TO PUBLIC LICENSE
+#   TERMS AND CONDITIONS FOR COPYING, DISTRIBUTION AND MODIFICATION
+#
+#  0. You just DO WHAT THE FUCK YOU WANT TO.
+
+# Better than nothing: http://www.in-ulm.de/~mascheck/various/set-e/
+set -e -u -f # -x
+
+LC_ALL=C
+export LC_ALL
+
+EOL='
+'
+TAB='	'
+EOT="$(IFS=''; printf '\004')"
+
+DEFAULT_INTERVALS='1 2 3 5 8 13 21 34 55 89'
+LEVEL_RETIRED=-1
+LEVEL_UNUSED=-2
+DAY="$(( 60 * 60 * 24 ))"
+
+unset opt_intervals
+help() (
+  set -e
+  intervals="${opt_intervals:-"${DEFAULT_INTERVALS}"}"
+  days=0 secs=0
+  for interval in $intervals; do
+    interval="$(new_interval "${interval}")"
+    : $(( days += (interval / DAY) + (secs += interval % DAY) / DAY ))
+    : $(( secs %= DAY ))
+  done
+  intervals="$(printf '%s,' $intervals)"
+  printf '%s' "\
+       ______+_______________+_____________________________________+
+      /    ##     /           /           /    +      /           //
+     + ########  /+ ##   ##  /  #######  /  ##       /  ##       //_
+    / ##        /  ##   ##  /  ##      +/  ##       +  ##    +  //__
+   /   ##### + /  #######  /  ######   /  ##       /  ##       // __
+  /        ## /  ##   ##  +  ##       /  ##    +  /  ##       //_ __
+ /  ######## /  ##   ##  /  #######  /  #######  /  #######  // __ _
+/__+__##____/___________/___________+___________/_______+___// _____
+
+\$ shellcard -- A minimal program for barbaric flash card reviews.
+|
+\$ Compile and accumulate flash card data in a plain text file:
+|
+|   level<tab>name 1<tab>name 2<tab>......<tab>name N
+|   0.000<tab>data 1<tab>data 2<tab>......<tab>data N
+|   0.000<tab>data 1<tab>data 2<tab>......<tab>data N
+|   .....<tab>......<tab>......<tab>......<tab>......
+|   0.000<tab>data 1<tab>data 2<tab>......<tab>data N
+|
+|   Namely a table of tab-separated values.
+|   Then this program will be in aid of your study.
+|
+\$ Available commands:
+|
+|   # to show this help information
+|   shellcard help
+|
+|   # to review a flash card collection
+|   shellcard review <file> [<option>=<value>]...
+|
+|   # to give your memory an examination
+|   shellcard test <file> [<option>=<value>]...
+|
+|   # to show statistics about card decks
+|   shellcard stat <file> [intervals=<value>]
+|
+|   # to check integrity of the database
+|   shellcard check <file>
+|
+|   # to reset your progress of practice
+|   shellcard reset <file>
+|
+\$ Common options:
+|
+|   # maximum number of cards (default: all/review, 100/test)
+|   cards=<integer>
+|
+|   # front side(s) of cards (default: 2nd column in the table)
+|   front=<comma,separated,column,names>
+|
+|   # back side(s) of cards (default: 3rd column in the table)
+|   back=<comma,separated,column,names>
+|
+|   # intervals between reviews as the proficiency level goes up
+|   # units of time: (d) - day, w - week, m - month, y - year
+|   # default: ${intervals}<x> (${days} days in total)
+|   intervals=<comma,separated,intervals>
+|
+\$ May you succeed with the Leitner spaced repetition system!
+"
+)
+echo() {
+  printf '%s\n' "$*"
+}
+pipe() (
+  set -e
+  while IFS='' read -r line; do printf '%s\n' "${line}"; done
+)
+shellcard_echo() {
+  printf '\033[0;1;32m[shellcard]\033[0m %s\n' "$*"
+}
+shellcard_ekho() {
+  printf '\033[0;1;31m[shellcard]\033[0m %s\n' "$*"
+}
+die() {
+  if [ 0 -lt "$#" ]; then
+    shellcard_ekho "$*" >&2
+  fi
+  exit 1
+}
+
+case_in() {
+  eval "! case \"\$1\" in (${2:-\"\"}) false; esac"
+}
+
+# NOTE: "IFS=$TAB read -r ..." would skip empty fields
+tsv_read() {
+  (printf '\n' | read -r ${1+"$@"}) || return 1
+  set -- _ ${1+"$@"}
+  while [ 0 -lt "$#" ]; do
+    case "$1" in (-*|[0-9]*|*[!a-zA-Z_0-9]*|'')
+      printf 'tsv_read(): invalid variable name "%s"\n' "$1" >&2
+      return 1
+    esac
+    IFS='' read -r "$1" || return 1
+    eval " $1=\"\${$1%_}\" " || return 1
+    shift
+  done <<EOT
+EOT$(
+  fields='' i="$#"
+  if IFS='' read -r line; then
+    while [ 2 -lt "${i}" ]; do
+      field="${line%%'	'*}"
+      fields="${fields}_
+${field}"
+      line="${line#"${field}"}"
+      line="${line#'	'}"
+      i=$(( i - 1 ))
+    done
+    printf '%s' ${fields:+"${fields}_"} ${line:+"
+${line}_"} '
+_'
+  fi
+)
+EOT
+}
+
+have() {
+  [ -x "$(command -v "$1" 2>/dev/null)" ]
+}
+
+exec 7<&0
+sttyx() {
+  if [ -t 0 ]; then
+    if command -p -v stty >/dev/null 2>&1; then
+      command -p stty ${1+"$@"}
+    else
+      stty ${1+"$@"}
+    fi
+  else
+    shellcard_ekho 'terminal was not interactive' >&2
+  fi
+} <&7
+stty_mode_getch_on() {
+  sttyx -icanon -echo || die 'failed to turn on getch mode'
+}
+stty_mode_getch_off() {
+  sttyx icanon echo || die 'failed to turn off getch mode'
+}
+getch() {
+  [ -t 0 ] || shellcard_ekho 'terminal was not interactive' >&2
+  dd bs=1 count=1 2>/dev/null
+} <&7
+clear_screen() {
+  if [ -t 1 ]; then printf '\033[H\033[2J'; fi
+}
+
+STTY="$(sttyx -g)" || die 'failed to save terminal settings'
+cleanup() {
+  sttyx "${STTY}"
+}
+trap cleanup EXIT
+
+# PCG Random Number Generation ported to POSIX shell {
+#
+# Notice from original implementation in the C programming language:
+#
+# Copyright 2014-2019 Melissa O'Neill <oneill@pcg-random.org>,
+#                     and the PCG Project contributors.
+#
+# Licensed under the Apache License, Version 2.0 (provided in
+# LICENSE-APACHE.txt and at http://www.apache.org/licenses/LICENSE-2.0)
+# or under the MIT license (provided in LICENSE-MIT.txt and at
+# http://opensource.org/licenses/MIT), at your option. This code may not
+# be copied, modified, or distributed except according to those terms.
+#
+# Distributed on an "AS IS" BASIS, WITHOUT WARRANTY OF ANY KIND, either
+# express or implied.  See your chosen license for details.
+#
+# For additional information about the PCG random number generation scheme,
+# visit http://www.pcg-random.org/.
+pcg16si_srandom_r() {
+  : $(( pcg_state = (0 * 12829 + 47989) % 65536 ))
+  : $(( pcg_state += ((($1) % 65536) & 65535) ))
+  : $(( pcg_state = (pcg_state * 12829 + 47989) % 65536 ))
+}
+pcg16si_random_r() {
+  set -- "$(( pcg_state ))"
+  : $(( pcg_state = (pcg_state * 12829 + 47989) % 65536 ))
+  : $(( pcg_number = (($1 >> (($1 >> 13) + 3)) ^ $1) * 62169 % 65536 ))
+  : $(( pcg_number = (pcg_number >> 11) ^ pcg_number ))
+}
+pcg16si_boundedrand_r() {
+  set -- "$(( (($1) % 65536) & 65535 ))" "$(( 65536 % (($1) % 65536) ))"
+  while true; do
+    pcg16si_random_r
+    if [ "$2" -le "${pcg_number}" ]; then
+      : $(( pcg_number %= $1 ))
+      break
+    fi
+  done
+}
+# PCG Random Number Generation ported to POSIX shell }
+
+slur() {
+  set -- "$(( $1 ))" "$2"
+  if [ 1 -lt "$1" ]; then
+    printf '%s %ss' "$1" "$2"
+  elif [ 1 -eq "$1" ]; then
+    printf '%s %s' "$1" "$2"
+  elif [ 1 -gt "$1" ]; then
+    printf 'no %s' "$2"
+  fi
+}
+
+new_timestamp() {
+  if have date; then
+    date '+%s'
+  else
+    sqlite3 -bail <<'EOT'
+SELECT strftime('%s', 'now');
+EOT
+  fi
+}
+
+new_interval() {
+  case "$1" in
+    (*y) echo "$(( ${1%y} * DAY * 365 ))" ;;
+    (*m) echo "$(( ${1%m} * DAY * 30 ))" ;;
+    (*w) echo "$(( ${1%w} * DAY * 7 ))" ;;
+    (*d) echo "$(( ${1%d} * DAY ))" ;;
+    (*H) echo "$(( ${1%H} * 60 * 60 ))" ;;
+    (*M) echo "$(( ${1%M} * 60 ))" ;;
+    (*S) echo "$(( ${1%S} ))" ;;
+    (*) echo "$(( $1 * DAY ))"
+  esac
+}
+
+read_headers() (
+  set -e
+  IFS='' read -r line \
+    || die "missing table headers on first line"
+  case_in "${line}" 'level|level"${TAB}"*' \
+    || die "first table header must be \"level\""
+  ! case_in "${line}" '*" "*' \
+    || die "table header must not contain spaces"
+  echo "${line}"
+)
+
+check_level() {
+  case "$1" in
+    (0[!.]*|*.0?*) false ;;
+    ([0-9]*.?*) ! case_in "${1%%.*}${1#*.}" '*[!0-9]*' ;;
+    ([RU]*) ! case_in "${1#?.}" '""|*[!0-9]*' ;;
+    (*) ! case_in "$1" '""|*[!0-9]*'
+  esac
+}
+
+check_source() (
+  set -e
+  shellcard_echo 'Checking tab-separated values in source file...'
+  shellcard_echo '| Checking table headers...'
+  read_headers > /dev/null
+  shellcard_echo '| Checking table values...'
+  if have awk; then
+    awk '
+      BEGIN {
+        FS = OFS = "\t"
+        label = "\033[0;1;31m[shellcard]\033[0m Error: "
+        exitcode = 0
+      }
+      $1 ~ /^0[^.]|\.0./ || $1 !~ /^([0-9]+|[RU])(\.[0-9]+)?$/ {
+        print label "invalid level \"" $1 "\" on line " (NR + 1) > "/dev/stderr"
+        print $0 > "/dev/stderr"
+        exitcode = 1
+      }
+      END {
+        exit exitcode
+      }
+    '
+  else
+    lineno=1 exitcode=0
+    while IFS='' read -r line; do
+      : $(( lineno += 1 ))
+      level="${line%%"${TAB}"*}"
+      if ! check_level "${level}"; then
+        shellcard_ekho \
+          "Error: invalid level \"${level}\" on line ${lineno}" >&2
+        echo "${line}" >&2
+        exitcode=1
+      fi
+    done
+    return "${exitcode}"
+  fi
+)
+
+# translate header names into c0, c1, c2, ... (indexed by original position)
+translate_headers() (
+  set -e
+  source="$1" result=''
+  shift
+  for header; do
+    i=0
+    for s in $source ''; do
+      if [ x"${header}" = x"${s}" ]; then result="${result} c${i}"; break; fi
+      if [ '' = "${s}" ]; then die "header \"${header}\" not found"; fi
+      : $(( i += 1 ))
+    done
+  done
+  echo $result
+)
+
+arg_split() {
+  echo $(IFS="$1"; printf '%s\n' $2)
+}
+arg_parse() {
+  [ 1 -le "$#" ] || die 'please specify the source of flash cards'
+  src_file="$1" opt_front='' opt_back='' opt_cards='' opt_intervals=''
+  shift
+  for arg; do
+    case "${arg}" in
+      (cards=*) opt_cards="${arg#*=}" ;;
+      (front=*) opt_front="$(arg_split , "${arg#*=}")" ;;
+      (back=*) opt_back="$(arg_split , "${arg#*=}")" ;;
+      (intervals=*) opt_intervals="$(arg_split , "${arg#*=}")" ;;
+    esac
+  done
+  for arg in ${opt_intervals:-$DEFAULT_INTERVALS}; do
+    ! case_in "${arg%[ymwdHMS]}" '""|0?*|0|*[!1-9]*' \
+      || die "invalid interval \"${arg}\""
+  done
+  ! case_in "${opt_cards}" '*[!0-9]*' \
+    || die "option \"cards=${opt_cards}\" must use a non-negative integer"
+}
+src_parse() {
+  src_headers="$(read_headers < "${src_file}")"
+  opt_front="$(translate_headers "${src_headers}" $opt_front)"
+  opt_back="$(translate_headers "${src_headers}" $opt_back)"
+  src_headers="$(translate_headers "${src_headers}" $src_headers)"
+  opt_front="${opt_front:-c1}" opt_back="${opt_back:-c2}"
+  opt_front="$(translate_headers "${src_headers}" $opt_front)"
+  opt_back="$(translate_headers "${src_headers}" $opt_back)"
+  SQL_INIT="
+CREATE TABLE cards(c0 BLOB DEFAULT 0 $(printf ', %s BLOB' ${src_headers#c0}));
+.nullvalue ''
+.mode tabs
+.import /dev/fd/3 cards
+"
+}
+
+get_cards() (
+  set -e
+  mode="$1"
+  case_in "${mode}" 'review|test' || die "unknown mode \"${mode}\""
+  now="$(new_timestamp)"
+  read_headers > /dev/null
+  if have sqlite3; then
+    if [ review = "${mode}" ]; then
+      conditions="(c0 GLOB '[0-9]*')
+                  AND (0 + ltrim(ltrim(c0, '0123456789'), '.') <= ${now})"
+    elif [ test = "${mode}" ]; then
+      conditions="(c0 GLOB '[0-9R]*')"
+    else
+      die
+    fi
+    sqlite3 -bail 3<&0 <<EOT
+${SQL_INIT}
+-- [LINENO, LEVEL, SIDES...]
+SELECT rowid + 1, CAST(c0 as INTEGER) $(printf ', %s' ${src_headers#c0})
+FROM cards
+WHERE ${conditions}
+      AND (0 $(printf "+ IFNULL(length(trim(%s)), 0)" $opt_front) > 0)
+      AND (0 $(printf "+ IFNULL(length(trim(%s)), 0)" $opt_back) > 0)
+ORDER BY random()
+${opt_cards:+LIMIT ${opt_cards}};
+EOT
+  else
+    cards="$(
+      set -e
+      if have awk; then
+        awk -v now="${now}" -v mode="${mode}" -v headers="${src_headers}" \
+            -v front="${opt_front}" -v back="${opt_back}" '
+          BEGIN {
+            FS = OFS = "\t"
+            split(headers, a, /[[:space:]]+/)
+            for (k in a) if (length(a[k]) > 0) hdrs[a[k]] = ++i
+            split(front, fs, /[[:space:]]+/)
+            split(back, bs, /[[:space:]]+/)
+          }
+          function has_data(fields, _k,_v) {
+            for (_k in fields) {
+              _v = fields[_k]
+              if (_v in hdrs && $hdrs[_v] ~ /[^[:space:]]/) return 1
+            }
+            return 0
+          }
+          $1 ~ /^[0-9R]/ {
+            split($1, a, ".")
+            if (mode == "review") {
+              if (now < 0 + a[2]) next
+            } else {
+              if (mode != "test") exit 1
+            }
+            if (has_data(fs) && has_data(bs)) {
+              $1 = a[1]
+              print NR + 1, $0
+            }
+          }
+        '
+      else
+        cmd_1="front=\"$(printf '${%s}' ${opt_front})\""
+        cmd_2="back=\"$(printf '${%s}' ${opt_back})\""
+        cmd_3="data=\"$(printf '${TAB}${%s}' ${src_headers#c0})\""
+        lineno=1
+        while tsv_read ${src_headers} rest; do
+          : $(( lineno += 1 ))
+          if [ review = "${mode}" ]; then
+            case_in "${c0}" '[0-9]*' || continue
+            ! case_in "${c0}" '*.*' || [ 0"${c0#*.}" -le "${now}" ] || continue
+          elif [ test = "${mode}" ]; then
+            case_in "${c0}" '[0-9R]*' || continue
+          else
+            die
+          fi
+          eval " ${cmd_1}"
+          case_in "${front}" '*[![:space:]]*' || continue
+          eval " ${cmd_2}"
+          case_in "${back}" '*[![:space:]]*' || continue
+          eval " ${cmd_3}"
+          level="${c0%%.*}"
+          echo "${lineno}${TAB}${level}${data}${rest:+"${TAB}${rest}"}"
+        done
+      fi
+    )"
+    if have shuf; then
+      shuf ${opt_cards:+-n"${opt_cards}"}
+    elif have awk; then
+      awk -v n="${opt_cards:-NR}" '
+        BEGIN { FS = OFS = "\t"; srand() }
+        { a[NR - 1] = $0 }
+        END {
+          for (i=0; i<NR; ++i) { k=int(rand()*NR); t=a[i]; a[i]=a[k]; a[k]=t }
+          for (i=0; i<NR && i<n; ++i) print a[i]
+        }
+      '
+    else
+      lineno=0
+      while IFS='' read -r line; do
+        eval "line_${lineno}=\"\${line}\""
+        : $(( lineno += 1 ))
+      done
+      [ 65535 -ge "${lineno}" ] || die 'line number exceeded 65535'
+      pcg16si_srandom_r "${now}"
+      i="${lineno}"
+      while [ 1 -lt "${i}" ]; do
+        pcg16si_boundedrand_r "${i}"  # Fisher-Yates random shuffling
+        : $(( i -= 1 ))
+        eval "
+          line=\"\${line_${i}}\"
+          line_${i}=\"\${line_${pcg_number}}\"
+          line_${pcg_number}=\"\${line}\"
+        "
+      done
+      i="${opt_cards:-"${lineno}"}"
+      while [ 0 -lt "${i}" ]; do
+        : $(( i -= 1 ))
+        eval "printf '%s\\n' \"\${line_${i}}\""
+      done
+    fi <<EOT
+${cards}
+EOT
+  fi
+)
+
+review_cards() (
+  set -e
+  mode="$1" passed=0 failed=0 changes=0
+  case_in "${mode}" 'review|test' || die "unknown mode \"${mode}\""
+  cmd_1="front=\"$(printf '${%s}${EOL}' ${opt_front})\""
+  cmd_2="back=\"$(printf '${%s}${EOL}' ${opt_back})\""
+  exe="$(if have sqlite3; then echo sql; elif have awk; then echo awk; fi)"
+  sql_values='(NULL,NULL)'
+  awk_values="${TAB}"
+  stty_mode_getch_on
+  # set variables: level_[id] date_[id]
+  while tsv_read lineno ${src_headers} rest; do
+    clear_screen
+    shellcard_echo 'Press any key to flip through the cards.'
+    eval " ${cmd_1}"
+    printf '%s' "${front}"
+    getch > /dev/null
+    eval " ${cmd_2}"
+    printf '%s' "${back}"
+    shellcard_echo '<space> easy | <tab> hard | <a> archive | <q> quit'
+    review_quit=no
+    while true; do
+      key="$(getch)"
+      now="$(new_timestamp)"
+      case "${key}" in
+        (' ')
+          if [ review = "${mode}" ]; then
+            i=0 k="$(( c0 + 1 ))" interval=
+            for interval in ${opt_intervals:-$DEFAULT_INTERVALS} 0; do
+              : $(( i += 1 ))
+              if [ "${i}" -eq "${k}" ]; then
+                interval="$(new_interval "${interval}")"
+                break
+              fi
+            done
+            if [ 0 -lt "${interval}" ]; then
+              if [ sql = "${exe}" ]; then
+                level="'$(( c0 + 1 )).$(( now + interval ))'"
+                sql_values="${sql_values},(${lineno},${level})"
+              elif [ awk = "${exe}" ]; then
+                level="$(( c0 + 1 )).$(( now + interval ))"
+                awk_values="${awk_values}${EOL}${lineno}${TAB}${level}"
+              else
+                : $(( level_${lineno} = c0 + 1 ))
+                : $(( date_${lineno} = now + interval ))
+              fi
+            else
+              if [ sql = "${exe}" ]; then
+                level="'R.${now}'"
+                sql_values="${sql_values},(${lineno},${level})"
+              elif [ awk = "${exe}" ]; then
+                level="R.${now}"
+                awk_values="${awk_values}${EOL}${lineno}${TAB}${level}"
+              else
+                : $(( level_${lineno} = LEVEL_RETIRED ))
+                : $(( date_${lineno} = now ))
+              fi
+            fi
+            : $(( changes += 1 ))
+          else
+            : # no level-up through tests
+          fi
+          : $(( passed += 1 ))
+          ;;
+        ("${TAB}")
+          for interval in ${opt_intervals:-$DEFAULT_INTERVALS} 1d; do
+            interval="$(new_interval "${interval}")"
+            if [ 0 -ne "$(( interval > DAY ))" ]; then
+              interval="${DAY}"
+            fi
+            break
+          done
+          if [ sql = "${exe}" ]; then
+            level="'0.$(( now + interval ))'"
+            sql_values="${sql_values},(${lineno},${level})"
+          elif [ awk = "${exe}" ]; then
+            level="'0.$(( now + interval ))'"
+            awk_values="${awk_values}${EOL}${lineno}${TAB}${level}"
+          else
+            : $(( level_${lineno} = 0 ))
+            : $(( date_${lineno} = now + interval ))
+          fi
+          : $(( failed += 1 ))
+          : $(( changes += 1 ))
+          ;;
+        (a|A)
+          if [ sql = "${exe}" ]; then
+            level="'U.${now}'"
+            sql_values="${sql_values},(${lineno},${level})"
+          elif [ awk = "${exe}" ]; then
+            level="U.${now}"
+            awk_values="${awk_values}${EOL}${lineno}${TAB}${level}"
+          else
+            : $(( level_${lineno} = LEVEL_UNUSED ))
+            : $(( date_${lineno} = now ))
+          fi
+          : $(( changes += 1 ))
+          ;;
+        ("${EOT}"|q|Q)
+          review_quit=yes
+          ;;
+        (*) continue
+      esac
+      break
+    done
+    if [ yes = "${review_quit}" ]; then
+      break
+    fi
+  done
+  stty_mode_getch_off
+  if [ 0 -lt "${changes}" ]; then
+    clear_screen
+    shellcard_echo "Recording your progress..."
+    data="$(
+      set -e
+      if [ sql = "${exe}" ]; then
+        sqlite3 -bail 3<&0 <<EOT
+${SQL_INIT}
+WITH scores(id, level) AS (VALUES ${sql_values})
+UPDATE cards SET c0 = (SELECT level FROM scores WHERE id = cards.rowid)
+WHERE rowid IN (SELECT id FROM scores);
+SELECT * FROM cards ORDER BY rowid;
+EOT
+      elif [ awk = "${exe}" ]; then
+        awk '
+          BEGIN { FS = OFS = "\t" }
+          NR == FNR { scores[$1] = $2 }
+          NR != FNR { $1 = (FNR in scores ? scores[FNR] : $1); print }
+        ' /dev/fd/3 - 3<<EOT
+${awk_values}
+EOT
+      else
+        read_headers
+        lineno=1
+        while IFS='' read -r line; do
+          level="${line%%"${TAB}"*}"
+          rest="${line#"${level}"}"
+          : $(( lineno += 1 ))
+          eval "score=\"\${level_${lineno}-}\""
+          case "${score}" in
+            ('') : ;;
+            ("${LEVEL_RETIRED}") level="R.$(( date_${lineno} ))" ;;
+            ("${LEVEL_UNUSED}") level="U.$(( date_${lineno} ))" ;;
+            (*) level="$(( level_${lineno} )).$(( date_${lineno} ))"
+          esac
+          echo "${level}${rest}"
+        done
+      fi < "${src_file}"
+    )"
+    check_source > /dev/null <<EOT
+${data}
+EOT
+    echo "${data}" > "${src_file}"
+  fi
+  clear_screen
+  shellcard_echo "${passed} passed, ${failed} failed, good job!"
+)
+
+shellcard_review() {
+  arg_parse ${1+"$@"}
+  src_parse
+  check_source < "${src_file}" > /dev/null
+  cards="$(get_cards review < "${src_file}")"
+  if [ 0 -ge "${#cards}" ]; then
+    shellcard_echo 'No cards for reviews yet.'
+    return 0
+  fi
+  review_cards review <<EOT
+${cards}
+EOT
+}
+
+shellcard_test() {
+  arg_parse ${1+"$@"}
+  src_parse
+  check_source < "${src_file}" > /dev/null
+  opt_cards="${opt_cards:-100}"
+  cards="$(get_cards test < "${src_file}")"
+  if [ 0 -ge "${#cards}" ]; then
+    shellcard_echo 'No cards for exams yet!'
+    return 0
+  fi
+  review_cards test <<EOT
+${cards}
+EOT
+}
+
+shellcard_stat() {
+  arg_parse ${1+"$@"}
+  check_source < "${src_file}" > /dev/null
+  now="$(new_timestamp)"
+  intervals="$(
+    for interval in ${opt_intervals:-$DEFAULT_INTERVALS}; do
+      new_interval "${interval}" || die
+    done
+  )"
+  if have awk; then
+    read_headers > /dev/null
+    awk -v day="${DAY}" -v now="${now}" -v intervals="${intervals}" '
+      function s(n, o) {
+        n = 0 + n
+        return (n > 1 ? n " " o "s" : (n == 0 ? "no " o : n " " o))
+      }
+      function r(n) {
+        return int(n + 0.5)
+      }
+      BEGIN {
+        FS = OFS = "\t"
+        split(intervals, a, /[[:space:]]+/)
+        for (k in a) if (length(a[k]) > 0) ++total_decks
+      }
+      /^R/ { ++deck_R; next }
+      /^U/ { ++deck_U; next }
+      {
+        split($1 "." now, a, ".")
+        ++deck[0 + a[1]]
+        if (a[2] - now <= day * 7 * 2) ++queued
+        recent = (recent == "" || recent > a[2]) ? a[2] : recent
+      }
+      END {
+        print "$ You have " s(NR, "card") " in " (total_decks + 3) " decks."
+        for (i = 0; i <= total_decks; ++i) {
+          print "| Deck#" (i + 1) " has " s(deck[i], "card") "."
+        }
+        print "| Deck#" (total_decks + 2) " has " s(deck_R, "retired card") "."
+        print "| Deck#" (total_decks + 3) " has " s(deck_U, "unused card") "."
+        print "$ You have " s(queued, "card") " to review in the next 7 days."
+        if (recent != "") {
+          recent = recent < now ? 0 : r((recent - now) / day)
+          print "| The next review is in " s(recent, "day") "."
+        }
+      }
+    '
+  else
+    total_decks=0 deck_0=0 deck_R=0 deck_U=0 total=0 queued=0 recent=''
+    for interval in $intervals; do
+      : $(( total_decks += 1 ))
+      : $(( deck_${total_decks} = 0 ))
+    done
+    read_headers > /dev/null
+    while IFS='' read -r line; do
+      : $(( total += 1 ))
+      rest="${line%%"${TAB}"*}"
+      level="${rest%%[!0-9]*}"
+      rest="${rest#"${level}"}"
+      date="${rest#.}"
+      date="${date:-"${now}"}"
+      case "${level}" in
+        (R*) : $(( deck_R += 1 )) ;;
+        (U*) : $(( deck_U += 1 )) ;;
+        (*)
+          : $(( deck_${level%%[!0-9]*} += 1 ))
+          : $(( queued += (date - now <= DAY * 7 * 2) ))
+          if [ '' = "${recent}" ] || [ 0"${recent}" -gt "${date}" ]; then
+            recent="${date}"
+          fi
+      esac
+    done
+    echo "\$ You have $(slur total card) in $(slur 'total_decks + 3' deck)."
+    i=0
+    while [ "${i}" -le "${total_decks}" ]; do
+      n="$(( deck_${i} ))"
+      echo "| Deck#$(( i + 1 )) has $(slur n card)."
+      : $(( i += 1 ))
+    done
+    echo "| Deck#$(( total_decks + 2 )) has $(slur deck_R 'retired card')."
+    echo "| Deck#$(( total_decks + 3 )) has $(slur deck_U 'unused card')."
+    echo "\$ You have $(slur queued card) to review in the next 7 days."
+    if [ '' != "${recent}" ]; then
+      : $(( recent = recent < now ? 0 : (recent - now + DAY / 2) / DAY ))
+      echo "| The next review is in $(slur recent day)."
+    fi
+  fi < "${src_file}"
+}
+
+shellcard_check() {
+  arg_parse ${1+"$@"}
+  check_source < "${src_file}"
+  shellcard_echo 'Done!'
+}
+
+shellcard_reset() {
+  arg_parse ${1+"$@"}
+  check_source < "${src_file}" > /dev/null
+  data="$(
+    set -e
+    if have awk; then
+      read_headers
+      awk 'BEGIN { FS = OFS = "\t" }{ $1 = 0; print }'
+    else
+      read_headers
+      while IFS='' read -r line; do
+        case "${line}" in
+          (*"${TAB}"*) echo "0${TAB}${line#*"${TAB}"}" ;;
+          (*) echo 0 ;;
+        esac
+      done
+    fi < "${src_file}"
+  )"
+  echo "${data}" > "${src_file}"
+  shellcard_echo 'Sucessfully reset the records.'
+}
+
+# shellcard_main() {
+if [ 0 -ge "$#" ]; then
+  help >&2
+  exit 1
+else
+  action="$1"
+  shift
+fi
+case "${action}" in
+  (help) help ;;
+  (review) shellcard_review ${1+"$@"} ;;
+  (test) shellcard_test ${1+"$@"} ;;
+  (stat) shellcard_stat ${1+"$@"} ;;
+  (check) shellcard_check ${1+"$@"} ;;
+  (reset) shellcard_reset ${1+"$@"} ;;
+  (*) {
+    shellcard_ekho "unknown action \"${action}\""
+    echo
+    help
+    die
+  } >&2
+esac
+# }
