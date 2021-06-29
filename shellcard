@@ -470,11 +470,19 @@ EOT
       shuf ${opt_cards:+-n"${opt_cards}"}
     elif have awk; then
       awk -v n="${opt_cards:-NR}" '
-        BEGIN { FS = OFS = "\t"; srand() }
-        { a[NR - 1] = $0 }
+        BEGIN {
+          FS = OFS = "\t"
+          srand()
+        }
+        {
+          a[NR - 1] = $0
+        }
         END {
-          for (i=0; i<NR; ++i) { k=int(rand()*NR); t=a[i]; a[i]=a[k]; a[k]=t }
-          for (i=0; i<NR && i<n; ++i) print a[i]
+          for (i = NR - 1; i > 0; --i) {
+            k = int(rand() * (i + 1))  # Fisher-Yates random shuffling
+            t = a[i]; a[i] = a[k]; a[k] = t
+          }
+          for (i = 0; i < NR && i < n; ++i) print a[i]
         }
       '
     else
