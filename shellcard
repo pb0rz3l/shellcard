@@ -166,24 +166,39 @@ have() {
 exec 7<&0
 sttyx() {
   if [ -t 0 ]; then
+    have stty || return
     if command -p -v stty >/dev/null 2>&1; then
       command -p stty ${1+"$@"}
     else
-      stty ${1+"$@"}
+      command stty ${1+"$@"}
     fi
   else
     shellcard_ekho 'terminal was not interactive' >&2
   fi
 } <&7
 stty_mode_getch_on() {
-  sttyx -icanon -echo || die 'failed to turn on getch mode'
+  if have dd; then
+    sttyx -icanon -echo || die 'failed to turn on getch mode'
+  fi
 }
 stty_mode_getch_off() {
-  sttyx icanon echo || die 'failed to turn off getch mode'
+  if have dd; then
+    sttyx icanon echo || die 'failed to turn off getch mode'
+  fi
 }
+
+if have dd; then
+  KEY='any key'
+else
+  KEY='the Enter key'
+fi
 getch() {
   [ -t 0 ] || shellcard_ekho 'terminal was not interactive' >&2
-  dd bs=1 count=1 2>/dev/null
+  if have dd; then
+    dd bs=1 count=1 2>/dev/null
+  else
+    (IFS='' read -r line && printf '%c' "${line}")
+  fi
 } <&7
 clear_screen() {
   if [ -t 1 ]; then printf '\033[H\033[2J'; fi
@@ -527,7 +542,7 @@ review_cards() (
   # set variables: level_[id] date_[id]
   while tsv_read lineno ${src_headers} rest; do
     clear_screen
-    shellcard_echo 'Press any key to flip through the cards.'
+    shellcard_echo "Press ${KEY} to flip through the cards."
     eval " ${cmd_1}"
     printf '%s' "${front}"
     getch > /dev/null
