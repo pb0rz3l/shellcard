@@ -154,6 +154,14 @@ EOT
 have() {
   [ -x "$(command -v "$1" 2>/dev/null)" ]
 }
+wipe() {
+  if have rm; then
+    rm -- "$1"
+  else
+    [ -f "$1" ] || die "wipe(): file \"$1\" not found"
+    printf '' >"$1"
+  fi
+}
 
 exec 7<&0
 sttyx() {
@@ -301,7 +309,7 @@ check_source() (
   set -e
   shellcard_echo 'Checking tab-separated values in source file...'
   shellcard_echo '| Checking table headers...'
-  read_headers > /dev/null
+  read_headers >/dev/null
   shellcard_echo '| Checking table values...'
   if have awk; then
     awk '
@@ -325,8 +333,7 @@ check_source() (
       : $(( lineno += 1 ))
       level="${line%%"${TAB}"*}"
       if ! check_level "${level}"; then
-        shellcard_ekho \
-          "Error: invalid level \"${level}\" on line ${lineno}" >&2
+        shellcard_ekho "Error: invalid level \"${level}\" on line ${lineno}" >&2
         echo "${line}" >&2
         exitcode=1
       fi
@@ -374,7 +381,7 @@ arg_parse() {
     || die "option \"cards=${opt_cards}\" must use a non-negative integer"
 }
 src_parse() {
-  src_headers="$(read_headers < "${src_file}")"
+  src_headers="$(read_headers <"${src_file}")"
   opt_front="$(translate_headers "${src_headers}" $opt_front)"
   opt_back="$(translate_headers "${src_headers}" $opt_back)"
   src_headers="$(translate_headers "${src_headers}" $src_headers)"
@@ -394,7 +401,7 @@ get_cards() (
   mode="$1"
   case_in "${mode}" 'review|test' || die "unknown mode \"${mode}\""
   now="$(new_timestamp)"
-  read_headers > /dev/null
+  read_headers >/dev/null
   if have sqlite3; then
     if [ review = "${mode}" ]; then
       conditions="(c0 GLOB '[0-9]*')
@@ -537,7 +544,7 @@ review_cards() (
     shellcard_echo "Press ${KEY} to flip through the cards."
     eval " ${cmd_1}"
     printf '%s' "${front}"
-    getch > /dev/null
+    getch >/dev/null
     eval " ${cmd_2}"
     printf '%s' "${back}"
     shellcard_echo '<space> easy | <tab> hard | <a> archive | <q> quit'
@@ -668,12 +675,20 @@ EOT
           esac
           echo "${level}${rest}"
         done
-      fi < "${src_file}"
+      fi <"${src_file}"
     )"
-    check_source > /dev/null <<EOT
+    check_source >/dev/null <<EOT
 ${data}
 EOT
-    echo "${data}" > "${src_file}"
+    backup="${src_file}.orig"
+    pipe <"${src_file}" >"${backup}"
+    if echo "${data}" >"${src_file}"; then
+      wipe "${backup}"
+    else
+      shellcard_ekho 'failed to update the database'
+      shellcard_ekho "original data was saved in \"${backup}\""
+      die
+    fi
   fi
   clear_screen
   shellcard_echo "${passed} passed, ${failed} failed, good job!"
@@ -682,8 +697,8 @@ EOT
 shellcard_review() {
   arg_parse ${1+"$@"}
   src_parse
-  check_source < "${src_file}" > /dev/null
-  cards="$(get_cards review < "${src_file}")"
+  check_source <"${src_file}" >/dev/null
+  cards="$(get_cards review <"${src_file}")"
   if [ 0 -ge "${#cards}" ]; then
     shellcard_echo 'No cards for reviews yet.'
     return 0
@@ -696,9 +711,9 @@ EOT
 shellcard_test() {
   arg_parse ${1+"$@"}
   src_parse
-  check_source < "${src_file}" > /dev/null
+  check_source <"${src_file}" >/dev/null
   opt_cards="${opt_cards:-100}"
-  cards="$(get_cards test < "${src_file}")"
+  cards="$(get_cards test <"${src_file}")"
   if [ 0 -ge "${#cards}" ]; then
     shellcard_echo 'No cards for exams yet!'
     return 0
@@ -710,7 +725,7 @@ EOT
 
 shellcard_stat() {
   arg_parse ${1+"$@"}
-  check_source < "${src_file}" > /dev/null
+  check_source <"${src_file}" >/dev/null
   now="$(new_timestamp)"
   intervals="$(
     for interval in ${opt_intervals:-$DEFAULT_INTERVALS}; do
@@ -718,7 +733,7 @@ shellcard_stat() {
     done
   )"
   if have awk; then
-    read_headers > /dev/null
+    read_headers >/dev/null
     awk -v day="${DAY}" -v now="${now}" -v intervals="${intervals}" '
       function s(n, o) {
         n = 0 + n
@@ -760,7 +775,7 @@ shellcard_stat() {
       : $(( total_decks += 1 ))
       : $(( deck_${total_decks} = 0 ))
     done
-    read_headers > /dev/null
+    read_headers >/dev/null
     while IFS='' read -r line; do
       : $(( total += 1 ))
       rest="${line%%"${TAB}"*}"
@@ -793,18 +808,18 @@ shellcard_stat() {
       : $(( recent = recent < now ? 0 : (recent - now + DAY / 2) / DAY ))
       echo "| The next review is in $(slur recent day)."
     fi
-  fi < "${src_file}"
+  fi <"${src_file}"
 }
 
 shellcard_check() {
   arg_parse ${1+"$@"}
-  check_source < "${src_file}"
+  check_source <"${src_file}"
   shellcard_echo 'Done!'
 }
 
 shellcard_reset() {
   arg_parse ${1+"$@"}
-  check_source < "${src_file}" > /dev/null
+  check_source <"${src_file}" >/dev/null
   data="$(
     set -e
     if have awk; then
@@ -818,9 +833,17 @@ shellcard_reset() {
           (*) echo 0 ;;
         esac
       done
-    fi < "${src_file}"
+    fi <"${src_file}"
   )"
-  echo "${data}" > "${src_file}"
+  backup="${src_file}.orig"
+  pipe <"${src_file}" >"${backup}"
+  if echo "${data}" >"${src_file}"; then
+    wipe "${backup}"
+  else
+    shellcard_ekho 'failed to reset the records'
+    shellcard_ekho "original data was saved in \"${backup}\""
+    die
+  fi
   shellcard_echo 'Sucessfully reset the records.'
 }
 
