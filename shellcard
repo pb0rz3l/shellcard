@@ -265,10 +265,26 @@ slur() {
 new_timestamp() {
   if have date; then
     date '+%s'
-  else
+  elif have sqlite3; then
     sqlite3 -bail <<'EOT'
 SELECT strftime('%s', 'now');
 EOT
+  elif have perl; then
+    perl -e 'print time . "\n"'
+  elif have expect; then
+    expect -c 'puts [clock seconds]'
+  elif have tclsh; then
+    echo 'puts [clock seconds]' | tclsh
+  elif have jq; then
+    jq -r -n 'now | strftime("%s")'
+  elif have python; then
+    python -c 'import time; print(time.strftime("%s"))'
+  elif have ruby; then
+    ruby -e 'puts Time.now.to_i'
+  elif have php; then
+    php --no-php-ini --run 'echo time() . "\n";'
+  else
+    die 'failed to retrieve system time'
   fi
 }
 
@@ -411,7 +427,7 @@ get_cards() (
     else
       die
     fi
-    sqlite3 -bail 3<&0 <<EOT
+    sqlite3 -bail 3<&0 2>/dev/null <<EOT
 ${SQL_INIT}
 -- [LINENO, LEVEL, SIDES...]
 SELECT rowid + 1, CAST(c0 as INTEGER) $(printf ', %s' ${src_headers#c0})
