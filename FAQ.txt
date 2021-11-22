@@ -1,0 +1,83 @@
+========================================================================
+Why posix shell instead of bash, perl, python, ... ?
+========================================================================
+
+For portability and fun?  The program, the data format and the algorithm
+are real simple (except for the shell magic).  Just hack it as you wish!
+Ask for my shellcheckrc if you are astonished by the shellcheck report.
+
+
+========================================================================
+Why the Leitner algorithm and not SM-2 or ... ?
+========================================================================
+
+Because I'm still experimenting, plus I prefer simplicity over analysis.
+
+Ay hey, it's not my job to figure out how others' brains function.
+
+
+========================================================================
+What card counts as "easy" and what is "hard" ?
+========================================================================
+
+You decide it.  Once you fail, you go back to Lv.1 and retry as usual.
+This is barbaric review and you know if cheating is a good move!
+
+Adjust the intervals if you're unsure about your mental capability.
+
+
+========================================================================
+How is a test different from a review ? What is an archived card ?
+========================================================================
+
+Retired cards can appear in a test but not in a review.  The proficience
+level never goes up in a test, in other words, don't overtest yourself.
+
+Archived cards never appear again unless you manually edit the database.
+
+
+========================================================================
+Format of the flash card database ?
+========================================================================
+
+Overall it consists of newline-separated structures:
+
+    [header]
+    [record]
+    [record]
+    [record]
+     ......
+
+Each line contains TAB-separated values.  TAB is byte 0x09.
+
+Header is mandatory, with the first field as "level" (all lower-case).
+Afterwards the names of the other columns are specified.
+
+    "level" [column name 1] [column name 2] [column name 3] ...
+
+A record provides flash card data corresponding to the header.  The 1st
+field is the proficience level with all possible values listed below:
+
+    [integer]                           # e.g. "0"
+    [integer] "." [timestamp]           # e.g. "1.23456789"
+    "R"       "." [timestamp]           # e.g. "R.23456789"
+    "U"       "." [timestamp]           # e.g. "U.23456789"
+
+The timestamp tells when the next review is scheduled and the mark
+before "." indicates the interval being applied for the next review.
+The integral number before "." corresponds to the intervals between
+reviews.  Number N means the N-th interval is applied.  "R" is short for
+"retired", and "U" is for "unused".  Records marked by "R" or "U" will
+not appeared in reviews, but the ones marked by "R" can still be used in
+a test when running the command "shellcard test ...".
+
+The other fields of a record (card) are optional but they must have
+a corresponding column name in the header, otherwise the data can be
+removed from the record.  If the record cannot provide any data for the
+front or back sides of a card, the card will not appear in a review.
+Though a bit hackish you can utilize this feature to implement optional
+or multi-line contents for a card.
+
+You can sort the records by this command:
+
+    tail -n+2 cards.tsv | sort -k1,1g -k2
