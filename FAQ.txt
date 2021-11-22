@@ -7,7 +7,7 @@ are real simple (except for the shell magic).  Just hack it as you wish!
 Ask for my shellcheckrc if you are astonished by the shellcheck report.
 
 Required dependencies: date/sqlite3/perl/expect/tclsh/jq/python/ruby/php
-Optional dependencies: stty, dd, sqlite3, awk, shuf
+Optional dependencies: stty, dd, rm, sqlite3, awk, shuf
 
 
 ========================================================================
@@ -30,7 +30,7 @@ Adjust the intervals if you're unsure about your mental capability.
 
 
 ========================================================================
-How is a test different from a review ? What is an archived card ?
+How is a test different from a review ?  What is an archived card ?
 ========================================================================
 
 Retired cards can appear in a test but not in a review.  The proficiency
