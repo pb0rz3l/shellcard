@@ -30,7 +30,7 @@ Adjust the intervals if you're unsure about your mental capability.
 How is a test different from a review ? What is an archived card ?
 ========================================================================
 
-Retired cards can appear in a test but not in a review.  The proficience
+Retired cards can appear in a test but not in a review.  The proficiency
 level never goes up in a test, in other words, don't overtest yourself.
 
 Archived cards never appear again unless you manually edit the database.
@@ -65,6 +65,7 @@ field is the proficience level with all possible values listed below:
 
 The timestamp tells when the next review is scheduled and the mark
 before "." indicates the interval being applied for the next review.
+A timestamp is the seconds elapsed since the epoch 1970-01-01T00:00:00Z.
 The integral number before "." corresponds to the intervals between
 reviews.  Number N means the N-th interval is applied.  "R" is short for
 "retired", and "U" is for "unused".  Records marked by "R" or "U" will
