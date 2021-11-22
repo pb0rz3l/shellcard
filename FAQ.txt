@@ -6,6 +6,9 @@ For portability and fun?  The program, the data format and the algorithm
 are real simple (except for the shell magic).  Just hack it as you wish!
 Ask for my shellcheckrc if you are astonished by the shellcheck report.
 
+Required dependencies: date/sqlite3/perl/expect/tclsh/jq/python/ruby/php
+Optional dependencies: stty, dd, sqlite3, awk, shuf
+
 
 ========================================================================
 Why the Leitner algorithm and not SM-2 or ... ?
@@ -56,7 +59,7 @@ Afterwards the names of the other columns are specified.
     "level" [column name 1] [column name 2] [column name 3] ...
 
 A record provides flash card data corresponding to the header.  The 1st
-field is the proficience level with all possible values listed below:
+field is the proficiency level with all possible values listed below:
 
     [integer]                           # e.g. "0"
     [integer] "." [timestamp]           # e.g. "1.23456789"
