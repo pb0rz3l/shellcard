@@ -45,6 +45,10 @@ help() (
 
 \$ shellcard -- A minimal program for barbaric flash card reviews.
 |
+|   Spend the precious time
+|                            not compiling good cards but
+|         playing more shellcard.
+|
 \$ Compile and accumulate flash card data in a plain text file:
 |
 |   level<tab>name 1<tab>name 2<tab>......<tab>name N
