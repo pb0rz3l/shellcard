@@ -53,7 +53,7 @@ Overall it consists of newline-separated structures:
 
 Each line contains TAB-separated values.  TAB is byte 0x09.
 
-Header is mandatory, with the first field as "level" (all lower-case).
+Header is mandatory, with the first field as "level" (case-insensitive).
 Afterwards the names of the other columns are specified.
 
     "level" [column name 1] [column name 2] [column name 3] ...

@@ -294,11 +294,11 @@ new_interval() {
 read_headers() (
   set -e
   IFS='' read -r line \
-    || die "missing table headers on first line"
-  case_in "${line}" 'level|level"${TAB}"*' \
-    || die "first table header must be \"level\""
+    || die "missing table header on first line"
   ! case_in "${line}" '*" "*' \
-    || die "table header must not contain spaces"
+    || die "header field must not contain spaces"
+  case_in "${line%%"${TAB}"*}" '[Ll][Ee][Vv][Ee][Ll]' \
+    || die "first header field must be \"level\""
   echo "${line}"
 )
 
