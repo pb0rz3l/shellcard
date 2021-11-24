@@ -299,6 +299,8 @@ read_headers() (
     || die "header fields must not contain spaces"
   case_in "${line%%"${TAB}"*}" '[Ll][Ee][Vv][Ee][Ll]' \
     || die "first header field must be \"level\" (case-insensitive)"
+  ! case_in "${TAB}${line}${TAB}" '*"${TAB}${TAB}"*' \
+    || die "header fields must not be empty"
   echo "${line}"
 )
 
