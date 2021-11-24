@@ -296,9 +296,9 @@ read_headers() (
   IFS='' read -r line \
     || die "missing table header on first line"
   ! case_in "${line}" '*" "*' \
-    || die "header field must not contain spaces"
+    || die "header fields must not contain spaces"
   case_in "${line%%"${TAB}"*}" '[Ll][Ee][Vv][Ee][Ll]' \
-    || die "first header field must be \"level\""
+    || die "first header field must be \"level\" (case-insensitive)"
   echo "${line}"
 )
 
