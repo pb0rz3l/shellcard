@@ -6,7 +6,7 @@ For portability and fun?  The program, the data format and the algorithm
 are real simple (except for the shell magic).  Just hack it as you wish!
 Ask for my shellcheckrc if you are astonished by the shellcheck report.
 
-Required dependencies: date/sqlite3/perl/expect/tclsh/jq/python/ruby/php
+Required dependencies: date or sqlite3
 Optional dependencies: stty, dd, rm, sqlite3, awk, shuf
 
 
