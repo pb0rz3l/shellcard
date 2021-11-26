@@ -652,7 +652,7 @@ review_cards() (
     data="$(
       set -e
       if [ sql = "${exe}" ]; then
-        sqlite3 -bail 3<&0 <<EOT
+        sqlite3 -bail 3<&0 2>/dev/null <<EOT
 ${SQL_INIT}
 WITH scores(id, level) AS (VALUES ${sql_values})
 UPDATE cards SET c0 = (SELECT level FROM scores WHERE id = cards.rowid)
