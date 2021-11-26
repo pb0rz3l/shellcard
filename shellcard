@@ -858,7 +858,7 @@ shellcard_reset() {
 # shellcard_main() {
 if [ 0 -ge "$#" ]; then
   help >&2
-  exit 1
+  die
 else
   action="$1"
   shift
@@ -875,5 +875,5 @@ case "${action}" in
     echo
     die "unknown action \"${action}\""
   } >&2
-esac
+esac || die 'shellcard exited abnormally'
 # }
