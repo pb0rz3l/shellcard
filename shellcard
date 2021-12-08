@@ -170,7 +170,7 @@ wipe() {
 exec 7<&0
 sttyx() {
   if [ -t 0 ]; then
-    have stty || return
+    have stty || return 0
     if command -p -v stty >/dev/null 2>&1; then
       command -p stty ${1+"$@"}
     else
@@ -207,12 +207,6 @@ getch() {
 clear_screen() {
   if [ -t 1 ]; then printf '\033[H\033[2J'; fi
 }
-
-STTY="$(sttyx -g)" || die 'failed to save terminal settings'
-cleanup() {
-  sttyx "${STTY}"
-}
-trap cleanup EXIT
 
 # PCG Random Number Generation ported to POSIX shell {
 #
@@ -371,6 +365,7 @@ arg_split() {
 }
 arg_parse() {
   [ 1 -le "$#" ] || die 'please specify the source of flash cards'
+  { [ -f "$1" ] && [ -r "$1" ]; } || die "failed to read \"$1\""
   src_file="$1" opt_front='' opt_back='' opt_cards='' opt_intervals=''
   shift
   for arg; do
@@ -863,6 +858,18 @@ else
   action="$1"
   shift
 fi
+
+STTY="$(sttyx -g)" || die 'failed to save terminal settings'
+on_exit() {
+  exitcode="$?"
+  if [ 0 -ne "${exitcode}" ]; then
+    shellcard_ekho 'shellcard exited abnormally'
+  fi
+  sttyx "${STTY}"
+  exit "${exitcode}"
+}
+trap on_exit EXIT
+
 case "${action}" in
   (help) help ;;
   (review) shellcard_review ${1+"$@"} ;;
@@ -875,5 +882,5 @@ case "${action}" in
     echo
     die "unknown action \"${action}\""
   } >&2
-esac || die 'shellcard exited abnormally'
+esac
 # }
