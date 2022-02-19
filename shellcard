@@ -107,17 +107,17 @@ pipe() (
   while IFS='' read -r line; do printf '%s\n' "${line}"; done
 )
 shellcard_echo() {
-  printf '\033[0;1;32m[shellcard]\033[0m %s\n' "$*"
+  printf '\033[0;1m[shellcard]\033[0m %s\n' "$*" >&2
 }
 shellcard_ekho() {
-  printf '\033[0;1;31m[shellcard]\033[0m %s\n' "$*"
+  printf '\033[0;7m[shellcard]\033[0m %s\n' "$*" >&2
 }
 die() {
   if [ 0 -lt "$#" ]; then
-    shellcard_ekho "$*" >&2
+    shellcard_ekho "$*"
   fi
   exit 1
-}
+} >&2
 
 case_in() {
   eval "! case \"\$1\" in (${2:-\"\"}) false; esac"
@@ -177,7 +177,7 @@ sttyx() {
       command stty ${1+"$@"}
     fi
   else
-    shellcard_ekho 'terminal was not interactive' >&2
+    shellcard_ekho 'terminal was not interactive'
   fi
 } <&7
 stty_mode_getch_on() {
@@ -197,7 +197,7 @@ else
   KEY='the Enter key'
 fi
 getch() {
-  [ -t 0 ] || shellcard_ekho 'terminal was not interactive' >&2
+  [ -t 0 ] || shellcard_ekho 'terminal was not interactive'
   if have dd; then
     dd bs=1 count=1 2>/dev/null
   else
@@ -247,6 +247,7 @@ pcg16si_boundedrand_r() {
     fi
   done
 }
+unset -v pcg_state pcg_number
 # PCG Random Number Generation ported to POSIX shell }
 
 slur() {
@@ -317,12 +318,12 @@ check_source() (
     awk '
       BEGIN {
         FS = OFS = "\t"
-        label = "\033[0;1;31m[shellcard]\033[0m Error: "
+        label = "\033[0;7m[shellcard]\033[0m Error: "
         exitcode = 0
       }
       $1 ~ /^0[^.]|\.0./ || $1 !~ /^([0-9]+|[RU])(\.[0-9]+)?$/ {
-        print label "invalid level \"" $1 "\" on line " (NR + 1) > "/dev/stderr"
-        print $0 > "/dev/stderr"
+        print label "invalid level \"" $1 "\" on line " (NR + 1)
+        print $0
         exitcode = 1
       }
       END {
@@ -335,14 +336,14 @@ check_source() (
       : $(( lineno += 1 ))
       level="${line%%"${TAB}"*}"
       if ! check_level "${level}"; then
-        shellcard_ekho "Error: invalid level \"${level}\" on line ${lineno}" >&2
-        echo "${line}" >&2
+        shellcard_ekho "Error: invalid level \"${level}\" on line ${lineno}"
+        echo "${line}"
         exitcode=1
       fi
     done
     return "${exitcode}"
   fi
-)
+) 2>&1
 
 # translate header names into c0, c1, c2, ... (indexed by original position)
 translate_headers() (
